@@ -1,9 +1,9 @@
-package main
+package idcheck
 
 import (
-	"io"
 	"crypto/rand"
 	"encoding/base64"
+	"io"
 )
 
 var hashTable = func() [256]uint8 {
