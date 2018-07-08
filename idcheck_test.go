@@ -1,11 +1,15 @@
 package main
 
 import (
-	"testing"
-	"math"
 	"bytes"
 	"github.com/stretchr/testify/assert"
-	)
+	"math"
+	"testing"
+)
+
+func TestFailure(t *testing.T) {
+	assert.True(t, false)
+}
 
 func TestHashTable(t *testing.T) {
 	t.Run("contains all uint8 values", func(t *testing.T) {
@@ -25,7 +29,7 @@ func TestHashTable(t *testing.T) {
 	})
 
 	t.Run("is sufficiently shuffled", func(t *testing.T) {
-		for i,v := range hashTable{
+		for i, v := range hashTable {
 			if uint8(i) == v {
 				t.Logf("table position and value coincide at %d", i)
 			}
@@ -93,12 +97,13 @@ func TestService_ValidID(t *testing.T) {
 		idBytes := make([]byte, 16)
 		idBytes[15] = 0xec
 		id := ID(idBytes)
-		assert.False(t, NewService(WithIDLength(15)).ValidID(id))	})
-
+		assert.False(t, NewService(WithIDLength(15)).ValidID(id))
+	})
 
 	t.Run("returns false when id is too short", func(t *testing.T) {
 		idBytes := make([]byte, 16)
 		idBytes[15] = 0xec
 		id := ID(idBytes)
-		assert.False(t, NewService(WithIDLength(17)).ValidID(id))	})
+		assert.False(t, NewService(WithIDLength(17)).ValidID(id))
+	})
 }
