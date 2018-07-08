@@ -7,10 +7,6 @@ import (
 	"testing"
 )
 
-func TestFailure(t *testing.T) {
-	assert.True(t, false)
-}
-
 func TestHashTable(t *testing.T) {
 	t.Run("contains all uint8 values", func(t *testing.T) {
 		for i := 0; i <= math.MaxUint8; i++ {
