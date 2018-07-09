@@ -1,96 +1,139 @@
-package main
+// Package idcheck generates ids that can be verified using the final byte as a checksum.
+package idcheck
 
 import (
-	"io"
 	"crypto/rand"
 	"encoding/base64"
+	"errors"
+	"io"
 )
 
-var hashTable = func() [256]uint8 {
-	var vals [256]uint8
-	for n, _ := range vals {
-		vals[n] = uint8(n)
-	}
-	for _, i := range []int{2, 3, 5, 7, 11} {
-		for n, _ := range vals {
-			vals[n], vals[n/i] = vals[n/i], vals[n]
+const length = 16
+const hashByte = length - 1
+
+var (
+	global = newIDChecker()
+
+	hashTable = func() (vals [256]uint8) {
+		for n := range vals {
+			vals[n] = uint8(n)
 		}
-	}
-	return vals
-}()
+		for _, i := range []int{2, 3, 5, 7, 11} {
+			for n := range vals {
+				vals[n], vals[n/i] = vals[n/i], vals[n]
+			}
+		}
+		return
+	}()
+)
 
-func hash(data []byte) (hsh uint8) {
-	for _, d := range data {
-		hsh = hashTable[hsh^d]
+type (
+	//ID is an id
+	ID [length]byte
+
+	//IDChecker issues and validates IDs
+	IDChecker interface {
+		NewID() (*ID, error)
+		ValidID(id *ID) bool
 	}
-	return
+
+	idChecker struct {
+		idReader io.Reader
+		salt     []byte
+	}
+
+	//Option is an option for creating IDs
+	Option func(*idChecker)
+)
+
+//SetSalt sets the salt to use in hash calculations
+func SetSalt(salt string) { global.SetSalt(salt) }
+func (c *idChecker) SetSalt(salt string) {
+	c.salt = []byte(salt)
 }
 
-type Service struct {
-	IDLength int
-	idReader io.Reader
+//SetIDReader Sets the reader used to generate new IDs
+func SetIDReader(idReader io.Reader) { global.SetIDReader(idReader) }
+func (c *idChecker) SetIDReader(idReader io.Reader) {
+	c.idReader = idReader
 }
 
-type ServiceOpt func(*Service)
-
-func WithReader(reader io.Reader) ServiceOpt {
-	return func(idSvc *Service) {
-		idSvc.idReader = reader
+//Reader use reader to create new IDs instead of the default rand.Reader
+func Reader(reader io.Reader) Option {
+	return func(opts *idChecker) {
+		opts.idReader = reader
 	}
 }
 
-func WithIDLength(idLength int) ServiceOpt {
-	return func(svc *Service) {
-		svc.IDLength = idLength
+//Salt sets the salt to use in hash calculations
+func Salt(salt string) Option {
+	return func(opts *idChecker) {
+		opts.salt = []byte(salt)
 	}
 }
 
-func NewService(opts ...ServiceOpt) *Service {
-	svc := &Service{
+//NewIDChecker returns a new IDChecker
+func NewIDChecker(options ...Option) IDChecker {
+	return newIDChecker(options...)
+}
+
+func newIDChecker(options ...Option) *idChecker {
+	opts := &idChecker{
 		idReader: rand.Reader,
-		IDLength: 16,
 	}
-	for _, opt := range opts {
-		opt(svc)
+	for _, opt := range options {
+		opt(opts)
 	}
-	return svc
+	return opts
 }
 
-func NewID() (ID, error) {
-	return NewService().NewID()
-}
-func (svc *Service) NewID() (ID, error) {
-	idBytes := make([]byte, svc.IDLength-1)
-	_, err := svc.idReader.Read(idBytes)
+//NewID creates a new ID of default length with a random value
+func NewID() (*ID, error) { return global.NewID() }
+func (c *idChecker) NewID() (*ID, error) {
+	idBytes := make([]byte, length)
+	_, err := c.idReader.Read(idBytes)
 	if err != nil {
 		return nil, err
 	}
-	hashByte := byte(hash(idBytes))
-	idBytes = append(idBytes, hashByte)
-	return ID(idBytes), nil
+	id := ID{}
+	copy(id[:len(idBytes)-1], idBytes)
+	c.setHash(&id)
+
+	return &id, nil
 }
 
-type ID []byte
-
-func ValidID(id ID) bool {
-	return NewService().ValidID(id)
-}
-func (svc *Service) ValidID(id ID) bool {
-	if len(id) != svc.IDLength {
-		return false
-	}
-	hsh := hash([]byte(id)[:svc.IDLength-1])
-	return hsh == []byte(id)[svc.IDLength-1]
+//ValidID returns true if the ID has the correct length and checksum
+func ValidID(id *ID) bool { return global.ValidID(id) }
+func (c *idChecker) ValidID(id *ID) bool {
+	return id[hashByte] == c.calculateHash(id)
 }
 
-func (id ID) Base64() string {
-	return base64.RawURLEncoding.EncodeToString(id)
+//Base64 encodes an ID as a base64 string
+func (id *ID) Base64() string {
+	return base64.RawURLEncoding.EncodeToString(id[:])
 }
 
-func FromBase64(str string) (ID, error) {
+//FromBase64 creates a new ID from a base64 encoded string
+func FromBase64(str string) (*ID, error) {
 	b, err := base64.RawURLEncoding.DecodeString(str)
 	if err != nil {
 		return nil, err
 	}
-	return ID(b), nil
+	if len(b) != length {
+		return nil, errors.New("str is not the correct length")
+	}
+	id := ID{}
+	copy(id[:length], b)
+	return &id, nil
+}
+
+func (c *idChecker) setHash(id *ID) {
+	id[hashByte] = c.calculateHash(id)
+}
+
+func (c *idChecker) calculateHash(id *ID) (hsh byte) {
+	for _, d := range append(c.salt, id[:length-1]...) {
+		hsh = hashTable[hsh^d]
+	}
+	return
 }

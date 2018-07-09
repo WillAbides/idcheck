@@ -1,11 +1,12 @@
-package main
+package idcheck
 
 import (
-	"testing"
-	"math"
 	"bytes"
-	"github.com/stretchr/testify/assert"
-	)
+	"errors"
+	"math"
+	"reflect"
+	"testing"
+)
 
 func TestHashTable(t *testing.T) {
 	t.Run("contains all uint8 values", func(t *testing.T) {
@@ -25,7 +26,7 @@ func TestHashTable(t *testing.T) {
 	})
 
 	t.Run("is sufficiently shuffled", func(t *testing.T) {
-		for i,v := range hashTable{
+		for i, v := range hashTable {
 			if uint8(i) == v {
 				t.Logf("table position and value coincide at %d", i)
 			}
@@ -33,72 +34,108 @@ func TestHashTable(t *testing.T) {
 	})
 }
 
-func TestService_NewID_NewID(t *testing.T) {
+func assertNil(t *testing.T, v interface{}) {
+	t.Helper()
+	assertEqual(t, nil, v)
+}
+
+func assertEqual(t *testing.T, expected, actual interface{}) {
+	t.Helper()
+
+	if !reflect.DeepEqual(actual, expected) {
+		t.Logf("values are not equal\nexpected: %v\ngot: %v", expected, actual)
+		t.Fail()
+	}
+}
+
+func assert(t *testing.T, v bool) {
+	t.Helper()
+	if !v {
+		t.Log("expected true but got false")
+		t.Fail()
+	}
+}
+
+func TestNewID(t *testing.T) {
 	t.Run("hash byte matched known good value", func(t *testing.T) {
-		bts := make([]byte, 15)
-		rdr := bytes.NewReader(bts)
-		svc := NewService(WithReader(rdr))
-		id, err := svc.NewID()
-		assert.Nil(t, err)
-		assert.Equal(t, bts, []byte(id)[:15])
-		assert.Equal(t, uint8(0xec), []byte(id)[15])
+		bts := make([]byte, hashByte)
+		idChecker := NewIDChecker(Reader(bytes.NewReader(bts)), Salt("pepper"))
+		want := &ID{}
+		want[hashByte] = 208
+		id, err := idChecker.NewID()
+		assertNil(t, err)
+		assertEqual(t, want, id)
+	})
+
+	t.Run("hash byte changes with the salt", func(t *testing.T) {
+		bts := make([]byte, 30)
+		idChecker := newIDChecker(Reader(bytes.NewReader(bts)), Salt("salt"))
+		id, err := idChecker.NewID()
+		assertNil(t, err)
+		idChecker.SetSalt("pepper")
+		id2, err := idChecker.NewID()
+		assertNil(t, err)
+		assert(t, !bytes.Equal(id[:], id2[:]))
+	})
+
+	t.Run("errors on error reader", func(t *testing.T) {
+		idChecker := newIDChecker(Reader(&errReader{}))
+		_, err := idChecker.NewID()
+		assertEqual(t, errExample, err)
 	})
 }
 
 func TestFromBase64(t *testing.T) {
 	t.Run("empty string", func(t *testing.T) {
-		id, err := FromBase64("")
-		assert.Nil(t, err)
-		assert.Equal(t, make(ID, 0), id)
+		_, err := FromBase64("")
+		assertEqual(t, "str is not the correct length", err.Error())
 	})
 
 	t.Run("straight a", func(t *testing.T) {
 		id, err := FromBase64("AAAAAAAAAAAAAAAAAAAAAA")
-		assert.Nil(t, err)
-		assert.Equal(t, make(ID, 16), id)
+		assertNil(t, err)
+		assertEqual(t, &ID{}, id)
+	})
+
+	t.Run("invalid string", func(t *testing.T) {
+		_, err := FromBase64("\\\\")
+		assertEqual(t, "illegal base64 data at input byte 0", err.Error())
 	})
 }
 
 func TestID_Base64(t *testing.T) {
-	assert.Equal(t, "AAAAAAAAAAAAAAAAAAAAAA", make(ID, 16).Base64())
+	assertEqual(t, "AAAAAAAAAAAAAAAAAAAAAA", (&ID{}).Base64())
 	id, err := NewID()
-	assert.Nil(t, err)
+	assertNil(t, err)
 	idStr := id.Base64()
 	id2, err := FromBase64(idStr)
-	assert.Nil(t, err)
-	assert.Equal(t, id, id2)
+	assertNil(t, err)
+	assertEqual(t, id, id2)
 }
 
-func TestService_ValidID(t *testing.T) {
+func TestValidID(t *testing.T) {
 	t.Run("returns true for a valid ID", func(t *testing.T) {
-		idBytes := make([]byte, 16)
-		idBytes[15] = 0xec
-		id := ID(idBytes)
-		assert.True(t, ValidID(id))
+		var id ID
+		id[hashByte] = 0xec
+		assert(t, ValidID(&id))
 	})
 
 	t.Run("returns false when hash doesn't match", func(t *testing.T) {
-		idBytes := make([]byte, 16)
-		idBytes[15] = 0x01
-		id := ID(idBytes)
-		assert.False(t, ValidID(id))
+		var id ID
+		id[hashByte] = 0xe1
+		assert(t, !ValidID(&id))
 	})
 
 	t.Run("returns false for empty id", func(t *testing.T) {
 		var id ID
-		assert.False(t, ValidID(id))
+		assert(t, !ValidID(&id))
 	})
+}
 
-	t.Run("returns false when id is too long", func(t *testing.T) {
-		idBytes := make([]byte, 16)
-		idBytes[15] = 0xec
-		id := ID(idBytes)
-		assert.False(t, NewService(WithIDLength(15)).ValidID(id))	})
+var errExample = errors.New("an error")
 
+type errReader struct{}
 
-	t.Run("returns false when id is too short", func(t *testing.T) {
-		idBytes := make([]byte, 16)
-		idBytes[15] = 0xec
-		id := ID(idBytes)
-		assert.False(t, NewService(WithIDLength(17)).ValidID(id))	})
+func (r *errReader) Read(p []byte) (n int, err error) {
+	return 0, errExample
 }
