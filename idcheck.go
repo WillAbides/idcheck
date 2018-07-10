@@ -115,7 +115,7 @@ func (id *ID) Base64() string {
 
 //FromBase64 creates a new ID from a base64 encoded string
 func FromBase64(str string) (*ID, error) {
-	b, err := base64.RawURLEncoding.DecodeString(str)
+	b, err := base64.RawURLEncoding.Strict().DecodeString(str)
 	if err != nil {
 		return nil, err
 	}
